@@ -27,7 +27,34 @@ pub fn main(init: std.process.Init) !void {
     gl.clearBufferfv(.color, 0, &.{ 0.2, 0.4, 0.8, 1.0 });
 
     const arena = init.arena.allocator();
-    _ = arena;
+
+    const ttf = try TrueType.load(@embedFile("Mistral.ttf"));
+    const example_string = "こんにちは!";
+    const scale = ttf.scaleForPixelHeight(20);
+    var stdout_buffer: [1024]u8 = undefined;
+    var stdout_writer: std.Io.File.Writer = .init(.stdout(), init.io, stdout_buffer[0..]);
+    const stdout = &stdout_writer.interface;
+    var buffer: std.ArrayListUnmanaged(u8) = .empty;
+    defer buffer.deinit(arena);
+    var it = std.unicode.Utf8View.initComptime(example_string).iterator();
+    while (it.nextCodepoint()) |codepoint| {
+        const glyph = ttf.codepointGlyphIndex(codepoint);
+        if (glyph == .notdef) {
+            std.log.debug("0x{d}: none", .{codepoint});
+            continue;
+        }
+        std.log.debug("0x{d}: {d}", .{ codepoint, glyph });
+        buffer.clearRetainingCapacity();
+        const dims = try ttf.glyphBitmap(arena, &buffer, glyph, scale, scale);
+        const pixels = buffer.items;
+        for (0..dims.height) |j| {
+            for (0..dims.width) |i| {
+                try stdout.writeByte(" .:ioVM@"[pixels[j * dims.width + i] >> 5]);
+            }
+            try stdout.writeByte('\n');
+        }
+    }
+    try stdout.flush();
 
     while (!window.shouldClose()) {
         glfw.pollEvents();
