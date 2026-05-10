@@ -81,8 +81,8 @@ pub fn build(b: *std.Build) void {
         },
     });
 
-    const zopengl = b.dependency("zopengl", .{ .target = target });
-    exe_mod.addImport("zopengl", zopengl.module("root"));
+    const wgpu = b.dependency("wgpu_native_zig", .{ .target = target });
+    exe_mod.addImport("wgpu", wgpu.module("wgpu"));
 
     const zglfw = b.dependency("zglfw", .{ .target = target });
     exe_mod.addImport("zglfw", zglfw.module("glfw"));

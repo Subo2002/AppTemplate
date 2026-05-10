@@ -2,7 +2,7 @@ const std = @import("std");
 const Io = std.Io;
 const TrueType = @import("TrueType");
 const zglfw = @import("zglfw");
-const zopengl = @import("zopengl");
+const wgpu = @import("wgpu");
 
 const AppTemplate = @import("AppTemplate");
 const GLFW = zglfw.GLFW;
@@ -22,9 +22,102 @@ pub fn main(init: std.process.Init) !void {
 
     glfw.makeContextCurrent(window);
 
-    try zopengl.loadCoreProfile(GLFW.getProcAddress, 4, 0);
-    const gl = zopengl.wrapper;
-    gl.clearBufferfv(.color, 0, &.{ 0.2, 0.4, 0.8, 1.0 });
+    const instance = wgpu.Instance.create(null).?;
+    defer instance.release();
+
+    const adapter_request = instance.requestAdapterSync(
+        &wgpu.RequestAdapterOptions{},
+        init.io,
+        0,
+    );
+    const adapter = switch (adapter_request.status) {
+        .success => adapter_request.adapter.?,
+        else => return error.NoAdapter,
+    };
+    defer adapter.release();
+
+    const device_request = adapter.requestDeviceSync(
+        instance,
+        &wgpu.DeviceDescriptor{
+            .required_limits = null,
+        },
+        init.io,
+        0,
+    );
+    const device = switch (device_request.status) {
+        .success => device_request.device.?,
+        else => return error.NoDevice,
+    };
+    defer device.release();
+
+    const queue = device.getQueue().?;
+    queue.release();
+
+    const swap_chain_format = wgpu.TextureFormat.bgra8_unorm_srgb;
+
+    const target_texture = device.createTexture(&wgpu.TextureDescriptor{
+        .label = wgpu.StringView.fromSlice("Render texture"),
+        .size = output_extent,
+        .format = swap_chain_format,
+        .usage = wgpu.TextureUsages.render_attachment | wgpu.TextureUsages.copy_src,
+    }).?;
+    defer target_texture.release();
+
+    const target_texture_view = target_texture.createView(&wgpu.TextureViewDescriptor{
+        .label = wgpu.StringView.fromSlice("Render texture view"),
+        .mip_level_count = 1,
+        .array_layer_count = 1,
+    }).?;
+
+    const shader_module = device.createShaderModule(&wgpu.shaderModuleWGSLDescriptor(.{
+        .code = @embedFile("./shader.wgsl"),
+    })).?;
+    defer shader_module.release();
+
+    const staging_buffer = device.createBuffer(&wgpu.BufferDescriptor{
+        .label = wgpu.StringView.fromSlice("staging_buffer"),
+        .usage = wgpu.BufferUsages.map_read | wgpu.BufferUsages.copy_dst,
+        .size = output_size,
+        .mapped_at_creation = @as(u32, @intFromBool(false)),
+    }).?;
+    defer staging_buffer.release();
+
+    const color_targets = &[_]wgpu.ColorTargetState{
+        wgpu.ColorTargetState{
+            .format = swap_chain_format,
+            .blend = &wgpu.BlendState{
+                .color = wgpu.BlendComponent{
+                    .operation = .add,
+                    .src_factor = .src_alpha,
+                    .dst_factor = .one_minus_src_alpha,
+                },
+                .alpha = wgpu.BlendComponent{
+                    .operation = .add,
+                    .src_factor = .zero,
+                    .dst_factor = .one,
+                },
+            },
+        },
+    };
+
+    const pipeline = device.createRenderPipeline(&wgpu.RenderPipelineDescriptor{
+        .vertex = wgpu.VertexState{
+            .module = shader_module,
+            .entry_point = wgpu.StringView.fromSlice("vs_main"),
+        },
+        .primitive = wgpu.PrimitiveState{},
+        .fragment = &wgpu.FragmentState{ .module = shader_module, .entry_point = wgpu.StringView.fromSlice("fs_main"), .target_count = color_targets.len, .targets = color_targets.ptr },
+        .multisample = wgpu.MultisampleState{},
+    }).?;
+    defer pipeline.release();
+
+    { // Mock main "loop"
+
+    }
+
+    //try zopengl.loadCoreProfile(GLFW.getProcAddress, 4, 0);
+    //const gl = zopengl.wrapper;
+    //gl.clearBufferfv(.color, 0, &.{ 0.2, 0.4, 0.8, 1.0 });
 
     const arena = init.arena.allocator();
 
@@ -58,6 +151,53 @@ pub fn main(init: std.process.Init) !void {
 
     while (!window.shouldClose()) {
         glfw.pollEvents();
+
+        const next_texture = target_texture_view;
+
+        const encoder = device.createCommandEncoder(&wgpu.CommandEncoderDescriptor{
+            .label = wgpu.StringView.fromSlice("Command Encoder"),
+        }).?;
+        defer encoder.release();
+
+        const color_attachments = &[_]wgpu.ColorAttachment{wgpu.ColorAttachment{
+            .view = next_texture,
+            .clear_value = wgpu.Color{},
+        }};
+        const render_pass = encoder.beginRenderPass(&wgpu.RenderPassDescriptor{
+            .color_attachment_count = color_attachments.len,
+            .color_attachments = color_attachments.ptr,
+        }).?;
+
+        render_pass.setPipeline(pipeline);
+        render_pass.draw(3, 1, 0, 0);
+        render_pass.end();
+
+        // The render pass has to be released after .end() or otherwise we'll crash on queue.submit
+        // https://github.com/gfx-rs/wgpu-native/issues/412#issuecomment-2311719154
+        render_pass.release();
+
+        defer next_texture.release();
+
+        const img_copy_src = wgpu.TexelCopyTextureInfo{
+            .origin = wgpu.Origin3D{},
+            .texture = target_texture,
+        };
+        const img_copy_dst = wgpu.TexelCopyBufferInfo{
+            .layout = wgpu.TexelCopyBufferLayout{
+                .bytes_per_row = output_bytes_per_row,
+                .rows_per_image = output_extent.height,
+            },
+            .buffer = staging_buffer,
+        };
+
+        encoder.copyTextureToBuffer(&img_copy_src, &img_copy_dst, &output_extent);
+
+        const command_buffer = encoder.finish(&wgpu.CommandBufferDescriptor{
+            .label = wgpu.StringView.fromSlice("Command Buffer"),
+        }).?;
+        defer command_buffer.release();
+
+        queue.submit(&[_]*const wgpu.CommandBuffer{command_buffer});
 
         glfw.swapBuffers(window);
     }
