@@ -48,7 +48,7 @@ pub fn main(
         frame_capper.mode = .{ .limited = fps };
     };
 
-    const font_path = "data/Roboto-Regular.ttf";
+    const font_path = "data/Mistral.ttf";
     var font = try sdl.ttf.Font.init(font_path, 24);
     font.setHinting(.normal);
     defer font.deinit();
