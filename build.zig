@@ -90,6 +90,13 @@ pub fn build(b: *std.Build) void {
     });
     exe_mod.addImport("mach", mach_dep.module("mach"));
 
+    //const exe = @import("mach").addExecutable(mach_dep.builder, .{
+    //    .name = "AppTemplate",
+    //    .app = exe_mod,
+    //    .target = target,
+    //    .optimize = optimize,
+    //});
+
     const exe = b.addExecutable(.{
         .name = "AppTemplate",
         .root_module = exe_mod,
