@@ -1,134 +1,157 @@
+const sdl = @import("sdl");
 const std = @import("std");
-const Io = std.Io;
-const TrueType = @import("TrueType");
-const zglfw = @import("zglfw");
-const zopengl = @import("zopengl");
 
-const AppTemplate = @import("AppTemplate");
-const GLFW = zglfw.GLFW;
-const Window = zglfw.Window;
-pub fn main(init: std.process.Init) !void {
-    var glfw: GLFW = try .init();
-    defer glfw.terminate();
+const screen_width: c_int = 800;
+const screen_height: c_int = 600;
 
-    const window = try Window.create(
-        1600,
-        900,
-        "App",
-        null,
-        null,
+const fps = 60;
+
+pub fn main(
+    init: std.process.Init,
+) !void {
+    const allocator = init.gpa;
+    _ = allocator;
+
+    const log_app = sdl.log.Category.application;
+
+    try sdl.init(.{ .video = true, .events = true });
+    defer sdl.quit(.{ .video = true, .events = true });
+
+    try sdl.ttf.init();
+    defer sdl.ttf.quit();
+
+    try log_app.logInfo("Using SDL_ttf {d}.{d}.{d}", .{ sdl.ttf.major_version, sdl.ttf.minor_version, sdl.ttf.micro_version });
+    try log_app.logInfo("Linked against SDL_ttf version: {any}", .{sdl.ttf.getVersion()});
+    std.debug.assert(sdl.ttf.Version.atLeast(3, 0, 0));
+    const ft_version = sdl.ttf.getFreeTypeVersion();
+    try log_app.logInfo("Using FreeType {d}.{d}.{d}", .{ ft_version.major, ft_version.minor, ft_version.patch });
+    const hb_version = sdl.ttf.getHarfBuzzVersion();
+    try log_app.logInfo("Using HarfBuzz {d}.{d}.{d}", .{ hb_version.major, hb_version.minor, hb_version.patch });
+    std.debug.assert(sdl.ttf.wasInit() > 0);
+
+    const tag = sdl.ttf.stringToTag("test");
+    const tag_str = sdl.ttf.tagToString(tag);
+    try log_app.logInfo("Tag 'test' -> {any} -> {s}", .{ tag, &tag_str });
+
+    const window, const renderer = try sdl.render.Renderer.initWithWindow(
+        "SDL_ttf Example",
+        screen_width,
+        screen_height,
+        .{ .resizable = true, .high_pixel_density = true },
     );
-    defer window.destroy();
 
-    glfw.makeContextCurrent(window);
+    defer renderer.deinit();
+    defer window.deinit();
 
-    try zopengl.loadCoreProfile(GLFW.getProcAddress, 4, 0);
-    const gl = zopengl.wrapper;
-    gl.clearBufferfv(.color, 0, &.{ 0.2, 0.4, 0.8, 1.0 });
-
-    const arena = init.arena.allocator();
-
-    const ttf = try TrueType.load(@embedFile("Mistral.ttf"));
-    const example_string = "こんにちは!";
-    const scale = ttf.scaleForPixelHeight(20);
-    var stdout_buffer: [1024]u8 = undefined;
-    var stdout_writer: std.Io.File.Writer = .init(.stdout(), init.io, stdout_buffer[0..]);
-    const stdout = &stdout_writer.interface;
-    var buffer: std.ArrayListUnmanaged(u8) = .empty;
-    defer buffer.deinit(arena);
-    var it = std.unicode.Utf8View.initComptime(example_string).iterator();
-    while (it.nextCodepoint()) |codepoint| {
-        const glyph = ttf.codepointGlyphIndex(codepoint);
-        if (glyph == .notdef) {
-            std.log.debug("0x{d}: none", .{codepoint});
-            continue;
-        }
-        std.log.debug("0x{d}: {d}", .{ codepoint, glyph });
-        buffer.clearRetainingCapacity();
-        const dims = try ttf.glyphBitmap(arena, &buffer, glyph, scale, scale);
-        const pixels = buffer.items;
-        for (0..dims.height) |j| {
-            for (0..dims.width) |i| {
-                try stdout.writeByte(" .:ioVM@"[pixels[j * dims.width + i] >> 5]);
-            }
-            try stdout.writeByte('\n');
-        }
-    }
-    try stdout.flush();
-
-    while (!window.shouldClose()) {
-        glfw.pollEvents();
-
-        glfw.swapBuffers(window);
-    }
-}
-
-//pub fn main(init: std.process.Init) !void {
-//    _ = TrueType;
-//    _ = zglfw;
-//    _ = zopengl;
-//    // Prints to stderr, unbuffered, ignoring potential errors.
-//    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
-//
-//    // This is appropriate for anything that lives as long as the process.
-//    const arena: std.mem.Allocator = init.arena.allocator();
-//
-//    // Accessing command line arguments:
-//    const args = try init.minimal.args.toSlice(arena);
-//    for (args) |arg| {
-//        std.log.info("arg: {s}", .{arg});
-//    }
-//
-//    // In order to do I/O operations need an `Io` instance.
-//    const io = init.io;
-//
-//    // Stdout is for the actual output of your application, for example if you
-//    // are implementing gzip, then only the compressed bytes should be sent to
-//    // stdout, not any debugging messages.
-//    var stdout_buffer: [1024]u8 = undefined;
-//    var stdout_file_writer: Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
-//    const stdout_writer = &stdout_file_writer.interface;
-//
-//    try AppTemplate.printAnotherMessage(stdout_writer);
-//
-//    try stdout_writer.flush(); // Don't forget to flush!
-//}
-
-test "simple test" {
-    const gpa = std.testing.allocator;
-    var list: std.ArrayList(i32) = .empty;
-    defer list.deinit(gpa); // Try commenting this out and see if zig detects the memory leak!
-    try list.append(gpa, 42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
-}
-
-test "fuzz example" {
-    try std.testing.fuzz({}, testOne, .{});
-}
-
-fn testOne(context: void, smith: *std.testing.Smith) !void {
-    _ = context;
-    // Try passing `--fuzz` to `zig build test` and see if it manages to fail this test case!
-
-    const gpa = std.testing.allocator;
-    var list: std.ArrayList(u8) = .empty;
-    defer list.deinit(gpa);
-    while (!smith.eos()) switch (smith.value(enum { add_data, dup_data })) {
-        .add_data => {
-            const slice = try list.addManyAsSlice(gpa, smith.value(u4));
-            smith.bytes(slice);
-        },
-        .dup_data => {
-            if (list.items.len == 0) continue;
-            if (list.items.len > std.math.maxInt(u32)) return error.SkipZigTest;
-            const len = smith.valueRangeAtMost(u32, 1, @min(32, list.items.len));
-            const off = smith.valueRangeAtMost(u32, 0, @intCast(list.items.len - len));
-            try list.appendSlice(gpa, list.items[off..][0..len]);
-            try std.testing.expectEqualSlices(
-                u8,
-                list.items[off..][0..len],
-                list.items[list.items.len - len ..],
-            );
-        },
+    var frame_capper = sdl.extras.FramerateCapper(f32){ .mode = .{ .unlimited = {} } };
+    renderer.setVSync(.{ .on_each_num_refresh = 1 }) catch {
+        frame_capper.mode = .{ .limited = fps };
     };
+
+    const font_path = "data/Roboto-Regular.ttf";
+    var font = try sdl.ttf.Font.init(font_path, 24);
+    font.setHinting(.normal);
+    defer font.deinit();
+
+    try log_app.logInfo("Font Family: {s}", .{font.getFamilyName()});
+    try log_app.logInfo("Font Style: {s}", .{font.getStyleName()});
+    try log_app.logInfo("Font is fixed width: {}", .{font.isFixedWidth()});
+    try log_app.logInfo("Font is scalable: {}", .{font.isScalable()});
+    try log_app.logInfo("Font height: {d}", .{font.getHeight()});
+    try log_app.logInfo("Font ascent: {d}", .{font.getAscent()});
+    try log_app.logInfo("Font descent: {d}", .{font.getDescent()});
+    try log_app.logInfo("Font lineskip: {d}", .{font.getLineSkip()});
+    try log_app.logInfo("Font faces: {d}", .{font.getNumFaces()});
+    try log_app.logInfo("Font kerning enabled: {}", .{font.getKerning()});
+    try log_app.logInfo("Font has glyph 'A': {}", .{font.hasGlyph('A')});
+    if (font.getGlyphMetrics('A')) |metrics| {
+        try log_app.logInfo("Glyph 'A' metrics: minx={d}, maxx={d}, miny={d}, maxy={d}, advance={d}", .{
+            metrics.minx, metrics.maxx, metrics.miny, metrics.maxy, metrics.advance,
+        });
+    } else |err| {
+        try log_app.logWarn("Could not get glyph metrics for 'A': {s}", .{@errorName(err)});
+    }
+    if (font.getGlyphKerning('V', 'A')) |kerning| {
+        try log_app.logInfo("Kerning for 'VA': {d}", .{kerning});
+    } else |err| {
+        try log_app.logWarn("Could not get glyph kerning for 'VA': {s}", .{@errorName(err)});
+    }
+
+    const white: sdl.ttf.Color = .{ .r = 255, .g = 255, .b = 255, .a = 255 };
+    _ = white;
+    const yellow: sdl.ttf.Color = .{ .r = 255, .g = 255, .b = 0, .a = 255 };
+    _ = yellow;
+    const cyan: sdl.ttf.Color = .{ .r = 0, .g = 255, .b = 255, .a = 255 };
+    _ = cyan;
+    const magenta: sdl.ttf.Color = .{ .r = 255, .g = 0, .b = 255, .a = 255 };
+    _ = magenta;
+    //const clear: sdl.ttf.Color = .{ .r = 0, .g = 0, .b = 0, .a = 0 };
+    const black: sdl.ttf.Color = .{ .r = 0, .g = 0, .b = 0, .a = 255 };
+
+    const blended_texture = try textureFromSurface(renderer, try font.renderTextBlended("Blended Text", black));
+    defer blended_texture.deinit();
+
+    const text_engine: sdl.ttf.RendererTextEngine = try .initWithProperties(.{
+        .renderer = renderer,
+        .atlas_texture_size = 1024,
+    });
+    defer text_engine.deinit();
+
+    const text_obj: sdl.ttf.Text = try .init(.{ .value = text_engine.value }, font, "Editable Text Object");
+    defer text_obj.deinit();
+    try text_obj.setColor(255, 165, 0, 255);
+    try text_obj.setPosition(10, 450);
+
+    var quit_app = false;
+    while (!quit_app) {
+        const dt = frame_capper.delay();
+        _ = dt;
+
+        while (sdl.events.poll()) |event| {
+            switch (event) {
+                .quit, .terminating => quit_app = true,
+                .key_down => |key| {
+                    if (key.key == .escape) {
+                        quit_app = true;
+                    }
+                },
+                else => {},
+            }
+        }
+
+        if (frame_capper.frame_num > 0 and frame_capper.frame_num % 60 == 0) {
+            if (text_obj.getText().len > 50) {
+                try text_obj.setString("Editable Text Object");
+            } else {
+                try text_obj.appendString(" .");
+            }
+        }
+
+        // --- Rendering ---
+        try renderer.setDrawColor(.{ .r = 255, .g = 255, .b = 255, .a = 255 });
+        try renderer.clear();
+
+        var y_pos: f32 = 10;
+        const textures_to_render = [_]*const sdl.render.Texture{
+            &blended_texture,
+        };
+
+        for (textures_to_render) |tex_ptr| {
+            const tex = tex_ptr.*;
+            const width, const height = try tex.getSize();
+            const dst = sdl.rect.FRect{ .x = 10, .y = y_pos, .w = width, .h = height };
+            try renderer.renderTexture(tex, null, dst);
+            y_pos += height + 5;
+        }
+
+        const text_pos_x, const text_pos_y = try text_obj.getPosition();
+        try sdl.ttf.drawRendererText(text_obj, @as(f32, @floatFromInt(text_pos_x)), @as(f32, @floatFromInt(text_pos_y)));
+
+        try renderer.present();
+    }
+}
+
+fn textureFromSurface(renderer: sdl.render.Renderer, surface: sdl.surface.Surface) !sdl.render.Texture {
+    defer surface.deinit();
+    return try renderer.createTextureFromSurface(surface);
 }
