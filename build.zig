@@ -83,6 +83,10 @@ pub fn build(b: *std.Build) void {
 
     const mach_dep = b.dependency("mach", .{
         .target = target,
+        .optimize = optimize,
+        .core = true,
+        .sysaudio = true,
+        .sysgpu = true,
     });
     exe_mod.addImport("mach", mach_dep.module("mach"));
 
@@ -139,7 +143,6 @@ pub fn build(b: *std.Build) void {
     const exe_tests = b.addTest(.{
         .root_module = exe.root_module,
     });
-
     // A run step that will run the second test executable.
     const run_exe_tests = b.addRunArtifact(exe_tests);
 

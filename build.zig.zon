@@ -49,8 +49,8 @@
         //    .hash = "glfw_zig-1.0.0-NrvYoybRGQDPEjNA_QD3gwy5Eh78DIOauBV5BQCl73kh",
         //},
         .mach = .{
-            .url = "git+https://code.hexops.org/hexops/mach.git#656b30f12954d4410cf2b2c3a6d2636ec9426f10",
-            .hash = "mach-0.4.0-jXwHffZINADUsLz89OSAXTKpAXDDoAoEZCna-l2M3NFY",
+            .url = "git+https://code.hexops.org/hexops/mach.git#4f64149f2b9a2a77d250037c1afdcd20fb3e2069.tar.gz",
+            .hash = "mach-0.5.0-jXwHfTNmNABCSlb5DbmdA9t9c4LIhB3oVJDS-5lpvNYi",
         },
     },
     .paths = .{
