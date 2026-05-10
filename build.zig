@@ -62,7 +62,7 @@ pub fn build(b: *std.Build) void {
         // b.createModule defines a new module just like b.addModule but,
         // unlike b.addModule, it does not expose the module to consumers of
         // this package, which is why in this case we don't have to give it a name.
-        .root_source_file = b.path("src/main.zig"),
+        .root_source_file = b.path("src/App.zig"),
         // Target and optimization levels must be explicitly wired in when
         // defining an executable or library (in the root module), and you
         // can also hardcode a specific target for an executable or library
@@ -81,17 +81,10 @@ pub fn build(b: *std.Build) void {
         },
     });
 
-    const zopengl = b.dependency("zopengl", .{ .target = target });
-    exe_mod.addImport("zopengl", zopengl.module("root"));
-
-    const zglfw = b.dependency("zglfw", .{ .target = target });
-    exe_mod.addImport("zglfw", zglfw.module("glfw"));
-
-    const glfw = b.dependency("glfw_zig", .{ .target = target });
-    exe_mod.linkLibrary(glfw.artifact("glfw"));
-
-    const TrueType = b.dependency("TrueType", .{ .target = target });
-    exe_mod.addImport("TrueType", TrueType.module("TrueType"));
+    const mach_dep = b.dependency("mach", .{
+        .target = target,
+    });
+    exe_mod.addImport("mach", mach_dep.module("mach"));
 
     const exe = b.addExecutable(.{
         .name = "AppTemplate",
