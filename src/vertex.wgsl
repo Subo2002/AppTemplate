@@ -30,20 +30,11 @@ struct VertexOut {
     let dims = vec3(f32(inst.dims.x), f32(inst.dims.y), 1);
     let pos = vec3(f32(inst.pos.x), f32(inst.pos.y), 0);
 
-    var position: vec3<f32> = in.position;
-    //position.x /= 1.6;
+    var position: vec3<f32> = in.position.xyz;
     position *= dims;
     position += pos;
     position.z = inst.depth;
-    //let ndc = position / vec3(256, 144, 1);
-    //output.position_clip = vec4(
-    //    ndc.x * 2.0 - 1.0,
-    //    ndc.y * 2.0 - 1.0,
-    //    ndc.z,
-    //    1.0
-    //);
-    output.position_clip = vec4(position / vec3(256.0 * 2, 144.0 * 2, 1.0), 1.0);
-
+    output.position_clip = object_to_clip * vec4(position.xyz, 1);
     output.uv = in.uv;
     output.tex = inst.tex;
     let col = vec4(

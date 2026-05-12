@@ -9,8 +9,9 @@ const Window = zglfw.Window;
 
 const zgpu = @import("zgpu");
 
+const Render = @import("Render.zig").Render;
+
 const GraphicsLib = @import("Graphics.zig");
-const Graphics = GraphicsLib.Graphics;
 const Image = GraphicsLib.Image;
 
 const TextureAtlasLib = @import("TextureAtlas.zig");
@@ -20,9 +21,10 @@ const stbi = @import("zstbi");
 
 const Lib = @import("lib.zig");
 const Vector2I32 = Lib.Vector2I32;
+const Vector2 = @import("ZSMath").Vector2;
 
 pub const State = struct {
-    gfx: Graphics,
+    gfx: Render,
     atlas: TextureAtlas,
 
     pub fn init(state: *State, allc: Allocator, window: *Window) !void {
@@ -39,7 +41,6 @@ pub const State = struct {
 //use program memory instead of heap or stack
 //var _state: State = undefined;
 pub fn main(init: std.process.Init) !void {
-    _ = TrueType;
     const arena = init.arena.allocator();
     const io = init.io;
 
@@ -60,7 +61,7 @@ pub fn main(init: std.process.Init) !void {
 
     const ttf = try TrueType.load(@embedFile("Mistral.ttf"));
     const example_string = "dog";
-    const scale = ttf.scaleForPixelHeight(36 * 4);
+    const scale = ttf.scaleForPixelHeight(24 * 4);
 
     //var buf: [1024]u8 = undefined;
     //const stdout_writer = std.Io.File.stdout().writer(io, &buf);
@@ -68,6 +69,7 @@ pub fn main(init: std.process.Init) !void {
 
     var buffer: std.ArrayListUnmanaged(u8) = .empty;
     defer buffer.deinit(init.gpa);
+
     var it = std.unicode.Utf8View.initComptime(example_string).iterator();
     var i: u32 = @intCast(state.atlas.image_count);
     var atlas_pos: Vector2I32 = .zero;
@@ -78,16 +80,13 @@ pub fn main(init: std.process.Init) !void {
     const tcr = @as(f32, @floatFromInt(text_color.r)) / 255;
     const tcg = @as(f32, @floatFromInt(text_color.g)) / 255;
     const tcb = @as(f32, @floatFromInt(text_color.b)) / 255;
-
     while (it.nextCodepoint()) |codepoint| {
         const glyph = ttf.codepointGlyphIndex(codepoint);
         defer last_glyph = glyph;
         if (glyph == .notdef) {
-            std.log.debug("0x{d}: none", .{codepoint});
             continue;
         }
         defer i += 1;
-        std.log.debug("codepoint: {}, glyph: {}", .{ codepoint, glyph });
         buffer.clearRetainingCapacity();
         const dims = try ttf.glyphBitmap(init.gpa, &buffer, glyph, scale, scale);
         const pixels = buffer.items;
@@ -112,24 +111,23 @@ pub fn main(init: std.process.Init) !void {
         const kern = ttf.glyphKernAdvance(last_glyph, glyph) * scale;
         const box = ttf.glyphBitmapBox(glyph, scale, scale);
         const y1 = @as(f32, @floatFromInt(box.y1));
+        _ = y1;
         const y_off = @as(f32, @floatFromInt(box.y0));
         const x_off = @as(f32, @floatFromInt(box.x0));
-        std.log.debug("width: {}, kern: {}, lsb: {}, advance: {}, x_off: {}, y_off: {}", .{ dims.width, kern, data.left_side_bearing, data.advance_width, x_off, y_off });
 
         write_pos += kern;
         _ = state.gfx.addInstance(.{
             .tex = i,
             .dims = .init(@as(f32, @floatFromInt(dims.width)) / 4, @as(f32, @floatFromInt(dims.height)) / 4),
-            .pos = .init((write_pos + x_off) / 4, (0 - y1) / 4),
+            .pos = Vector2.init(0, 100).add(Vector2.init((write_pos + x_off) / 4, (y_off) / 4)),
         });
         write_pos += data.advance_width * scale;
         atlas_pos.x += @intCast(image.width);
     }
 
-    draw(state);
     while (!window.shouldClose()) {
         zglfw.pollEvents();
-        //draw(state);
+        draw(state);
     }
 }
 
