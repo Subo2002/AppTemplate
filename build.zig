@@ -81,22 +81,32 @@ pub fn build(b: *std.Build) void {
         },
     });
 
-    const wgpu = b.dependency("wgpu_native_zig", .{ .target = target });
-    exe_mod.addImport("wgpu", wgpu.module("wgpu"));
+    const wgpu = b.dependency("zgpu", .{ .target = target, .optimize = optimize });
+    exe_mod.addImport("zgpu", wgpu.module("root"));
+    exe_mod.linkLibrary(wgpu.artifact("zdawn"));
 
     const zglfw = b.dependency("zglfw", .{ .target = target });
-    exe_mod.addImport("zglfw", zglfw.module("glfw"));
-
-    const glfw = b.dependency("glfw_zig", .{ .target = target });
-    exe_mod.linkLibrary(glfw.artifact("glfw"));
+    exe_mod.addImport("zglfw", zglfw.module("root"));
+    exe_mod.linkLibrary(zglfw.artifact("glfw"));
 
     const TrueType = b.dependency("TrueType", .{ .target = target });
     exe_mod.addImport("TrueType", TrueType.module("TrueType"));
+
+    const zstbi = b.dependency("zstbi", .{ .target = target });
+    exe_mod.addImport("zstbi", zstbi.module("root"));
+
+    const zmath = b.dependency("zmath", .{ .target = target });
+    exe_mod.addImport("zmath", zmath.module("root"));
+
+    const ZSMath = b.dependency("ZSMath", .{ .target = target });
+    exe_mod.addImport("ZSMath", ZSMath.module("root"));
 
     const exe = b.addExecutable(.{
         .name = "AppTemplate",
         .root_module = exe_mod,
     });
+
+    @import("zgpu").addLibraryPathsTo(exe);
 
     // This declares intent for the executable to be installed into the
     // install prefix when running `zig build` (i.e. when executing the default
