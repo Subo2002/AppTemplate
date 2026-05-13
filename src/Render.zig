@@ -17,16 +17,12 @@ const Vector2B = zsmath.Vector2B;
 const Vector2 = zsmath.Vector2;
 const Vector2U32 = zsmath.Vector2Int(u32);
 
-const spline = @import("zspline");
-const Circle = spline.Circle;
-const CubicSpline = spline.CubicSpline;
-const Line = spline.Line;
-const world_size = @import("main.zig").world_size;
-
 const Graphics = @import("Graphics.zig");
 const ImageRef = Graphics.ImageRef;
 const Color = Graphics.Color;
 const Image = Graphics.Image;
+
+const TextureAtlas = @import("TextureAtlas.zig");
 
 pub const Render = struct {
     gfx_cntx: *gpu.GraphicsContext,
@@ -38,8 +34,6 @@ pub const Render = struct {
     vertex_buffer: gpu.BufferHandle,
     index_buffer: gpu.BufferHandle,
 
-    texture: gpu.TextureHandle,
-    texture_view: gpu.TextureViewHandle,
     sampler: gpu.SamplerHandle,
 
     window: *glfw.Window,
@@ -48,20 +42,14 @@ pub const Render = struct {
     instance_buffer: gpu.BufferHandle,
     no_instances: u32,
 
-    upload: ImageUploadData,
-    uploads_data: [max_no_images_per_frame]ImageUpload,
-
     images_handle: gpu.BufferHandle,
-    images: [max_no_images]AtlasRef,
 
     texture_atlas: gpu.TextureHandle,
     texture_atlas_header_handle: gpu.BufferHandle,
-    texture_atlas_header: TextureAtlas,
+    texture_atlas_header: TextureAtlasHeader,
 
     const instance_buffer_size = 50;
-    const max_no_images_per_frame = 64;
-    //WARNING: make sure this agrees with the fragment shader
-    const max_no_images = 256;
+
     const raw_uploads_buffer_pixel_size = 1024 * 1024 * 2; //max upload 1MB in a frame
     pub const raw_uploads_buffer_size = raw_uploads_buffer_pixel_size * @sizeOf(Color);
 
@@ -76,12 +64,6 @@ pub const Render = struct {
     }
 
     pub fn init(self: *Render, allc: std.mem.Allocator, window: *glfw.Window, atlas_size: Vector2U16) !void {
-        //not necessary
-        @memset(self.images[0..], AtlasRef{
-            .size = .zero,
-            .pos = .zero,
-        });
-
         std.debug.assert(@sizeOf(c_int) == @sizeOf(u32));
         const gfx_cntx = try gpu.GraphicsContext.create(
             allc,
@@ -103,7 +85,6 @@ pub const Render = struct {
         //create bind group layout for rendering
         const bind_group_layout = gfx_cntx.createBindGroupLayout(&.{
             gpu.bufferEntry(0, .{ .vertex = true, .fragment = true }, .uniform, true, 0),
-            gpu.textureEntry(1, .{ .fragment = true }, .float, .tvdim_2d, false),
             gpu.samplerEntry(2, .{ .fragment = true }, .filtering),
             gpu.textureEntry(9, .{ .fragment = true }, .float, .tvdim_2d, false),
             gpu.bufferEntry(11, .{ .fragment = true }, .uniform, false, 0),
@@ -249,7 +230,7 @@ pub const Render = struct {
                 .uniform = true,
                 .copy_dst = true,
             },
-            .size = max_no_images * @sizeOf(AtlasRef),
+            .size = TextureAtlas.max_no_images * @sizeOf(TextureAtlas.AtlasRef),
         });
 
         const texture_atlas = gfx_cntx.createTexture(.{
@@ -283,46 +264,15 @@ pub const Render = struct {
             .size = @sizeOf(TextureAtlas),
         });
 
-        const texture_atlas_header: TextureAtlas = .{
+        const texture_atlas_header: TextureAtlasHeader = .{
             .size = .implCast(atlas_size),
         };
 
         gfx_cntx.queue.writeBuffer(
             gfx_cntx.lookupResource(texture_atlas_header_handle).?,
             0,
-            TextureAtlas,
-            ([_]TextureAtlas{texture_atlas_header})[0..1],
-        );
-
-        const width = 256;
-        const height = 144;
-        const image: [width * height]Color = [1]Color{Color.blank} ** (width * height);
-
-        //create texture
-        const texture = gfx_cntx.createTexture(.{
-            .usage = .{ .texture_binding = true, .copy_dst = true },
-            .size = .{
-                .width = width,
-                .height = height,
-                .depth_or_array_layers = 1,
-            },
-            .format = gpu.imageInfoToTextureFormat(
-                4,
-                1,
-                false,
-            ),
-            .mip_level_count = 1,
-        });
-        const texture_view = gfx_cntx.createTextureView(texture, .{
-            .format = .rgba8_unorm,
-        });
-
-        gfx_cntx.queue.writeTexture(
-            .{ .texture = gfx_cntx.lookupResource(texture).? },
-            .{ .bytes_per_row = width * @sizeOf(Color), .rows_per_image = height },
-            .{ .width = width, .height = height },
-            Color,
-            image[0..],
+            TextureAtlasHeader,
+            ([_]TextureAtlasHeader{texture_atlas_header})[0..1],
         );
 
         const sampler = gfx_cntx.createSampler(.{
@@ -332,7 +282,7 @@ pub const Render = struct {
 
         const bind_group = gfx_cntx.createBindGroup(bind_group_layout, &.{
             .{ .binding = 0, .buffer_handle = gfx_cntx.uniforms.buffer, .offset = 0, .size = 512 },
-            .{ .binding = 1, .texture_view_handle = texture_view },
+            //.{ .binding = 1, .texture_view_handle = texture_view },
             .{ .binding = 2, .sampler_handle = sampler },
             //.{ .binding = 5, .texture_view_handle = atlas_write_view },
             //.{ .binding = 6, .buffer_handle = raw_uploads_buffer, .offset = 0, .size = raw_uploads_buffer_size },
@@ -340,7 +290,7 @@ pub const Render = struct {
             //.{ .binding = 8, .buffer_handle = images_data, .offset = 0, .size = max_no_images * @sizeOf(ImageAtlasRef) },
             .{ .binding = 9, .texture_view_handle = atlas_read_view },
             //.{ .binding = 10, .buffer_handle = upload_data, .offset = 0, .size = @sizeOf(ImageUpload) },
-            .{ .binding = 11, .buffer_handle = images_data, .offset = 0, .size = max_no_images * @sizeOf(AtlasRef) },
+            .{ .binding = 11, .buffer_handle = images_data, .offset = 0, .size = TextureAtlas.max_no_images * @sizeOf(TextureAtlas.AtlasRef) },
             .{ .binding = 12, .buffer_handle = texture_atlas_header_handle, .offset = 0, .size = @sizeOf(TextureAtlas) },
         });
 
@@ -352,8 +302,6 @@ pub const Render = struct {
         self.vertex_buffer = vertex_buffer;
         self.index_buffer = index_buffer;
 
-        self.texture = texture;
-        self.texture_view = texture_view;
         self.sampler = sampler;
 
         self.window = window;
@@ -362,14 +310,7 @@ pub const Render = struct {
         self.instance_data = undefined;
         self.no_instances = 0;
 
-        self.uploads_data = undefined;
-        self.upload = .{
-            .no = 0,
-            .size = 0,
-        };
-
         self.images_handle = images_data;
-        self.images = undefined;
 
         self.texture_atlas = texture_atlas;
 
@@ -412,12 +353,7 @@ pub const Render = struct {
         return _texture_view;
     }
 
-    pub fn draw(render: *Render, images: []Image) void {
-        for (render.uploads_data[0..render.upload.no]) |upload| {
-            render.images[upload.image_ref.ref] = upload.atlas_ref;
-        }
-        defer render.upload.no = 0;
-
+    pub fn draw(render: *Render) void {
         const gfx_cntx = render.gfx_cntx;
 
         const back_buffer_view = gfx_cntx.swapchain.getCurrentTextureView();
@@ -434,35 +370,6 @@ pub const Render = struct {
             .{ 0, 0, 1, 0 },
             .{ 0, 0, 0, 1 },
         };
-
-        gfx_cntx.queue.writeBuffer(
-            gfx_cntx.lookupResource(render.images_handle).?,
-            0,
-            AtlasRef,
-            render.images[0..],
-        );
-
-        const atlas = gfx_cntx.lookupResource(render.texture_atlas).?;
-        for (render.uploads_data[0..render.upload.no]) |upload| {
-            const image = images[upload.image_ref.ref];
-            std.debug.assert(image.width == upload.atlas_ref.size.x and image.height == upload.atlas_ref.size.y);
-            gfx_cntx.queue.writeTexture(
-                .{
-                    .texture = atlas,
-                    .origin = .{
-                        .x = @intCast(upload.atlas_ref.pos.x),
-                        .y = @intCast(upload.atlas_ref.pos.y),
-                    },
-                },
-                .{
-                    .bytes_per_row = image.width * @sizeOf(Color),
-                    .rows_per_image = image.height,
-                },
-                .{ .width = image.width, .height = image.height },
-                Color,
-                image.data,
-            );
-        }
 
         gfx_cntx.queue.writeBuffer(
             gfx_cntx.lookupResource(render.instance_buffer).?,
@@ -486,12 +393,7 @@ pub const Render = struct {
                     .view = back_buffer_view,
                     .load_op = .clear,
                     .store_op = .store,
-                    .clear_value = .{
-                        .r = 255,
-                        .g = 255,
-                        .b = 255,
-                        .a = 255,
-                    },
+                    .clear_value = .{ .r = 255, .g = 255, .b = 255, .a = 255 },
                 }};
                 const render_pass_info = wgpu.RenderPassDescriptor{
                     .color_attachment_count = color_attachments.len,
@@ -513,6 +415,7 @@ pub const Render = struct {
 
                 // Draw
                 {
+                    std.log.debug("rendering: {}", .{render.no_instances});
                     const mem = gfx_cntx.uniformsAllocate(math.Mat, 1);
                     mem.slice[0] = math.transpose(view);
                     pass.setBindGroup(0, bind_group, &.{mem.offset});
@@ -545,6 +448,14 @@ pub const Render = struct {
         if (gfx_cntx.present() == .swap_chain_resized) {}
     }
 
+    pub fn getAtlas(render: *Render) wgpu.Texture {
+        return render.gfx_cntx.lookupResource(render.texture_atlas).?;
+    }
+
+    pub fn getAtlasRefs(render: *Render) wgpu.Buffer {
+        return render.gfx_cntx.lookupResource(render.images_handle).?;
+    }
+
     pub fn addInstance(gfx: *Render, instance: InstanceData) u32 {
         const id = gfx.no_instances;
         gfx.instance_data[id] = instance;
@@ -574,25 +485,7 @@ pub const InstanceData = struct {
     };
 };
 
-//NEW
-pub const ImageUpload = struct {
-    image_ref: ImageRef,
-    atlas_ref: AtlasRef,
-};
-
-pub const AtlasRef = struct {
-    size: Vector2I32,
-    padding1: Vector2I32 = .zero,
-    pos: Vector2I32,
-    padding2: Vector2I32 = .zero,
-};
-
-pub const ImageUploadData = struct {
-    no: u32,
-    size: u32,
-};
-
-pub const TextureAtlas = struct {
+pub const TextureAtlasHeader = struct {
     size: Vector2U32,
 };
 
