@@ -355,6 +355,7 @@ pub const Render = struct {
 
     pub fn draw(render: *Render) void {
         const gfx_cntx = render.gfx_cntx;
+        defer render.no_instances = 0;
 
         const back_buffer_view = gfx_cntx.swapchain.getCurrentTextureView();
         defer back_buffer_view.release();
@@ -414,13 +415,10 @@ pub const Render = struct {
                 pass.setPipeline(pipeline);
 
                 // Draw
-                {
-                    std.log.debug("rendering: {}", .{render.no_instances});
-                    const mem = gfx_cntx.uniformsAllocate(math.Mat, 1);
-                    mem.slice[0] = math.transpose(view);
-                    pass.setBindGroup(0, bind_group, &.{mem.offset});
-                    pass.drawIndexed(6, render.no_instances, 0, 0, 0);
-                }
+                const mem = gfx_cntx.uniformsAllocate(math.Mat, 1);
+                mem.slice[0] = math.transpose(view);
+                pass.setBindGroup(0, bind_group, &.{mem.offset});
+                pass.drawIndexed(6, render.no_instances, 0, 0, 0);
             }
             {
                 const color_attachments = [_]wgpu.RenderPassColorAttachment{.{
