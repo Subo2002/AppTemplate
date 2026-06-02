@@ -37,9 +37,8 @@ pub fn deinit(self: *TextHandler, allc: Allocator) void {
     self.glyph_textures.deinit(allc);
 }
 
-pub fn compGlyphs(self: *TextHandler, ttf: TrueType, gpa: Allocator, text: []const u8) ![]const GlyphIndex {
+pub fn compGlyphs(ttf: TrueType, gpa: Allocator, text: []const u8) ![]const GlyphIndex {
     var it = (try std.unicode.Utf8View.init(text)).iterator();
-    _ = self;
     var glyphs: std.ArrayListUnmanaged(GlyphIndex) = .empty;
     while (it.nextCodepoint()) |codepoint| {
         try glyphs.append(gpa, ttf.codepointGlyphIndex(codepoint));
@@ -48,10 +47,10 @@ pub fn compGlyphs(self: *TextHandler, ttf: TrueType, gpa: Allocator, text: []con
     return glyphs.toOwnedSliceAssert();
 }
 
-pub fn compAndAddNewGlyphImages(self: *TextHandler, self_glyph_tex_map_allc: Allocator, ttf: TrueType, pixel_height: u16, glyphs: []const GlyphIndex, arena: *std.heap.ArenaAllocator, atlas_allc: Allocator, atlas: *TextureAtlas, set_to_render: bool) !void {
-    const scale = ttf.scaleForPixelHeight(pixel_height);
+pub fn compAndAddNewGlyphImages(self: *TextHandler, self_glyph_tex_map_allc: Allocator, ttf: TrueType, image_pixel_height: u16, glyphs: []const GlyphIndex, arena: *std.heap.ArenaAllocator, atlas_allc: Allocator, atlas: *TextureAtlas, set_to_render: bool) !void {
+    const scale = ttf.scaleForPixelHeight(image_pixel_height);
     for (glyphs) |glyph| {
-        const glyph_tex_id: GlyphTextureID = .init(glyph, pixel_height);
+        const glyph_tex_id: GlyphTextureID = .init(glyph, image_pixel_height);
         if (self.glyph_textures.contains(glyph_tex_id)) continue;
         var bitmap: std.ArrayListUnmanaged(u8) = .empty;
         defer assert(arena.reset(.free_all));
@@ -96,35 +95,52 @@ pub fn addGlyphsImagesToRender(self: *TextHandler, glyph_images: GlyphImages, at
     }
 }
 
-pub fn renderText(self: *TextHandler, render: *Render, pos: Vector2I32, ttf: TrueType, pixel_height: u16, color: Color, glyphs: []const GlyphIndex) void {
+pub fn compTextLength(text_info: TextInfo, glyphs: []const GlyphIndex) u16 {
     var write_pos: f32 = 0;
     var last_glyph: ?GlyphIndex = null;
-    const scale = ttf.scaleForPixelHeight(pixel_height);
+    const scale = text_info.ttf.scaleForPixelHeight(text_info.pixel_height * text_info.scale_up);
     for (glyphs) |glyph| {
         defer last_glyph = glyph;
-        const data = ttf.glyphHMetrics(glyph);
-        const kern = if (last_glyph) |lg| ttf.glyphKernAdvance(lg, glyph) * scale else 0;
-        const box = ttf.glyphBitmapBox(glyph, scale, scale);
+        const data = text_info.ttf.glyphHMetrics(glyph);
+        const kern = if (last_glyph) |lg| text_info.ttf.glyphKernAdvance(lg, glyph) * scale else 0;
+
+        write_pos += kern;
+        write_pos += data.advance_width * scale;
+    }
+    return @ceil(write_pos);
+}
+
+pub fn renderText(self: *TextHandler, render: *Render, pos: Vector2I32, text_info: TextInfo, color: Color, glyphs: []const GlyphIndex) void {
+    var write_pos: f32 = 0;
+    var last_glyph: ?GlyphIndex = null;
+    const scale = text_info.ttf.scaleForPixelHeight(text_info.pixel_height * text_info.scale_up);
+    for (glyphs) |glyph| {
+        defer last_glyph = glyph;
+        const data = text_info.ttf.glyphHMetrics(glyph);
+        const kern = if (last_glyph) |lg| text_info.ttf.glyphKernAdvance(lg, glyph) * scale else 0;
+        const box = text_info.ttf.glyphBitmapBox(glyph, scale, scale);
         const y1 = @as(f32, @floatFromInt(box.y1));
         const x1 = @as(f32, @floatFromInt(box.x1));
         const y0 = @as(f32, @floatFromInt(box.y0));
         const x0 = @as(f32, @floatFromInt(box.x0));
 
         write_pos += kern;
-        std.log.debug("tex: {}, width: {}, height: {}, x: {}, y: {}", .{
-            self.glyph_textures.get(.init(glyph, pixel_height)).?.ref,
-            (x1 - x0) / 4,
-            (y1 - y0) / 4,
-            pos.toFloat().x + (write_pos + x0) / 4,
-            pos.toFloat().y + y0 / 4,
-            //color,
-        });
         _ = render.addInstance(.{
-            .tex = self.glyph_textures.get(.init(glyph, pixel_height)).?.ref,
-            .dims = .init((x1 - x0) / 4, (y1 - y0) / 4),
-            .pos = pos.toFloat().add(.init((write_pos + x0) / 4, y0 / 4)),
+            .tex = self.glyph_textures.get(.init(glyph, text_info.pixel_height * text_info.scale_up)).?.ref,
+            .dims = .init((x1 - x0) / text_info.scale_up, (y1 - y0) / text_info.scale_up),
+            .pos = pos.toFloat().add(.init((write_pos + x0) / text_info.scale_up, y0 / text_info.scale_up)),
             .col = color,
         });
         write_pos += data.advance_width * scale;
     }
 }
+
+pub const TextInfo = struct {
+    ttf: TrueType,
+    pixel_height: u16,
+    scale_up: u16,
+
+    pub fn init(ttf: TrueType, pixel_height: u16, scale_up: u16) TextInfo {
+        return .{ .ttf = ttf, .pixel_height = pixel_height, .scale_up = scale_up };
+    }
+};

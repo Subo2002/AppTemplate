@@ -30,13 +30,15 @@ pub const Flags = packed struct {
 // PARTIALLY DONE: 4. ...no page stuff, and if it's full wipe the gpu atlas and upload all the needed textures. Kind of arena style
 // DONE: 5. write printLine method
 // DONE: 6. replace all the logic in main with this new stuff, will basically be empty again
-// 7. start ui
-// 8. want a centered title context
-// 9. want button
-// 10. want to be able to input numbers, and text
-// 11. want a screen division that is moveable
-// 12. want a draggable and placeable item
-// 13. want to be able to shrink and resize the window and all be nice
+// DONE: 7. create UIHandler, and use it to make window (ui-) cntx
+// DONE: 8. start ui
+// 9. want to print a little text ui
+// 10. want to be able to render images
+// 10. want button
+// 11. want to be able to input numbers, and text
+// 12. want a screen division that is moveable
+// 13. want a draggable and placeable item
+// 14. want to be able to shrink and resize the window and all be nice
 
 images: [max_no_images]Image,
 flags: [max_no_images]Flags,
