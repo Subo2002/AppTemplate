@@ -16,40 +16,35 @@ const TextHandler = @import("TextHandler.zig");
 
 pub const UIHandler = @This();
 
-pub const max_contexts = 100;
-boxes: [max_contexts]Box,
-flags: [max_contexts]Flags,
-links: [max_contexts]Links,
-limit: u15,
-count: u15,
+pub const CtxData = struct {
+    box: Box,
+    flags: Flags,
+    links: Links,
+};
 
-pub fn init(self: *UIHandler) void {
-    self.limit = 0;
-    self.count = 0;
-}
+pub const Box = struct {
+    x: u16,
+    y: u16,
+    w: u16,
+    h: u16,
+
+    pub const empty: Box = .{};
+};
+
+ctxs: std.ArrayList(CtxData),
+
+pub const empty: UIHandler = .{
+    .ctxs = .empty,
+};
 
 //WARNING: NOT INITIALIZED
-pub fn takeFreeCntx(self: *UIHandler) !Cntx {
-    if (self.count == max_contexts) return error.outOfSpace;
+pub fn takeFreeCntx(self: *UIHandler) !Ctx {
+    const index = try self.ctxs.;
 
-    if (self.limit == self.count) {
-        defer self.limit += 1;
-        defer self.count += 1;
-        self.flags[self.limit].free = false;
-        return .init(self.limit);
-    }
-
-    for (self.flags[0..self.limit], 0..) |flag, id| {
-        if (!flag.free) continue;
-        defer self.count += 1;
-        self.flags[id].free = false;
-        return .init(@intCast(id));
-    }
-    unreachable;
 }
 
 //should rename as really inits the data of the cntx
-fn clearCntx(self: *UIHandler, cntx: Cntx) void {
+fn clearCntx(self: *UIHandler, cntx: Ctx) void {
     self.boxes[cntx.id()] = .empty;
     self.flags[cntx.id()] = .empty;
     const link = &self.links[cntx.id()];
@@ -63,46 +58,36 @@ fn clear(self: *UIHandler) void {
     @memset(self.flags[0..self.limit], .empty);
 }
 
-pub fn freeCntx(self: *UIHandler, cntx: Cntx) void {
+pub fn freeCntx(self: *UIHandler, cntx: Ctx) void {
     self.flags[cntx.id.?] = true;
     if (cntx.id.? == self.limit) self.limit -= 1;
     self.count -= 1;
 }
 
-pub fn initCntx(self: *UIHandler) !Cntx {
+pub fn initCtx(self: *UIHandler) !Ctx {
     const cntx = try self.takeFreeCntx();
     self.clearCntx(cntx);
     self.flags[cntx.id()].active = true;
     return cntx;
 }
 
-pub fn getbox(self: *UIHandler, cntx: Cntx) *Box {
+pub fn getbox(self: *UIHandler, cntx: Ctx) *Box {
     return &self.boxes[cntx.id()];
 }
 
-pub fn setbox(self: *UIHandler, cntx: Cntx, box: Box) void {
+pub fn setbox(self: *UIHandler, cntx: Ctx, box: Box) void {
     self.boxes[cntx.id()] = box;
 }
 
-pub fn getLinks(self: *UIHandler, cntx: Cntx) *Links {
+pub fn getLinks(self: *UIHandler, cntx: Ctx) *Links {
     return &self.links[cntx.id()];
 }
 
-pub fn padCntx(self: *UIHandler, padding: Box, cntx: Cntx) !Cntx {
+pub fn padCntx(self: *UIHandler, padding: Box, cntx: Ctx) !Ctx {
     const child_box = self.getBox(cntx);
-    
-    //const child_box = self.getBox(cntx);
-    //const padding_box = padding.asrelc();
-    //padding_box.lift(child_box);
-    //padding_box.flip(child_box);
-
-    //const padding_cntx = try self.initCntx();
-    //self.setBox(padding_cntx, padding_box);
-    //self.linkCntxs(padding_cntx, cntx);
-    //return padding_cntx;
 }
 
-pub fn linkCntxs(self: *UIHandler, parent_cntx: Cntx, child_cntx: Cntx) void {
+pub fn linkCntxs(self: *UIHandler, parent_cntx: Ctx, child_cntx: Ctx) void {
     const parent = self.getLinks(parent_cntx);
     const cur_first_child_cntx = if (parent.child.back) |c| c else child_cntx;
     const cur_first_child = self.getLinks(cur_first_child_cntx);
@@ -118,16 +103,11 @@ pub fn linkCntxs(self: *UIHandler, parent_cntx: Cntx, child_cntx: Cntx) void {
     child.parent = parent;
 }
 
-pub fn makeText(self: *UIHandler, text_info: TextHandler.TextInfo, padding: Box, text: []const u8) !Cntx {
-    const text_cntx = try self.initCntx();
+pub fn makeText(self: *UIHandler, text_info: TextHandler.TextInfo, padding: Box, text: []const u8) !Ctx {
+    const text_cntx = try self.initCtx();
     const text_width = TextHandler.compTextLength(text_info, text);
     self.setbox(text_cntx, .init(.empty, .empty, .initFixed(text_info.pixel_height), .initFixed(text_width)));
     return self.padCntx(padding, text_cntx);
-}
-
-//recursively drops a parents box info in to it's children
-pub fn dropRecursive(self: *UIHandler, cntx: Cntx) void {
-    
 }
 
 pub fn renderCntxs(self: *UIHandler, render: *Render) void {
@@ -135,214 +115,90 @@ pub fn renderCntxs(self: *UIHandler, render: *Render) void {
     //if position not set then set it to 0 relative to the parent
     //then if size explicit can just offset by that to give position to sibling
     //if size is unknown
-    var cntx: Cntx = .init(0); //assuming is the root
+    var cntx: Ctx = .init(0); //assuming is the root
     while (!cntx.isempty()) {}
 }
 
-pub const Cntx = struct {
-    pub const empty: Cntx = .{ .index = null };
+pub const Ctx = struct {
+    pub const empty: Ctx = .{ .index = null };
 
     index: ?u15,
 
-    pub fn init(index: u15) Cntx {
+    pub fn init(index: u15) Ctx {
         return .{ .index = index };
     }
 
-    pub fn id(self: Cntx) u15 {
+    pub fn id(self: Ctx) u15 {
         return self.index.?;
     }
 
-    pub fn isempty(self: Cntx) bool {
+    pub fn isempty(self: Ctx) bool {
         return self.index == null;
     }
 };
 
-pub const Deps = packed struct(u2) {
-    parent: bool,
-    child: bool,
-    //prev_sib: bool,
+pub fn Compose(comptime kind1: TaskKind, comptime kind2: TaskKind, task1: Task(kind1), task2: Task(kind2)) Task(ComposeTaskKind(kind1, kind2)) {
+    return .init(.{ task1.t, task2.t });
+}
 
-    pub fn comp(box: Box) Deps {
+pub fn ComposeTaskKind(comptime kind1: TaskKind, comptime kind2: TaskKind) TaskKind {
+    const ComposedType = .{kind1.T, kind2.T};
+    const composedfn = struct {
+        pub fn do(data: *const ComposedType) void {
+            kind1.task(data[0]);
+            kind2.task(data[1]);
+        }
+    };
+    return .init(ComposedType, composedfn.do);
+}
+
+pub const TaskKind = struct {
+    T: type,
+    task: fn(*const T) void,
+
+    pub fn init(T: type, task: *fn(*const T) void) TaskKind {
         return .{
-            .parent = box.flags.contains(.rel_p),
-            .child = box.flags.contains(.rel_c),
-            //.prev
-
+            .T = T,
+            .task = task,
         };
     }
 };
 
-pub const ValueKind = enum(u2) {
-    none,
-    rel_p,
-    rel_c,
-    fixed,
-};
+pub fn Task(kind: TaskKind) type {
+    return struct {
+        t: kind.T,
 
-pub const Value = union(ValueKind) {
-    pub const empty: Value = .{ .none = .{} };
+        pub fn init(t: kind: T) Task(kind) {
+            return .{ .t = t };
+        }
 
-    none: void,
-    rel_p: i16,
-    rel_c: i16,
-    fixed: i16, //bit silly as position is always u16, but for casting a fixed box in a relative box
+        pub fn do(self: *const @This()) void {
+            task(kind.t);
+        }
+    };
+}
 
-    pub fn initFixed(value: i16) Value {
-        return .{ .fixed = value };
+pub const OffsetTask = struct {
+    ctx: *CtxData,
+    from: *const CtxData,
+    by: i16,
+
+    pub fn offsetX(ctx: *CtxData, from: *const CtxData, by: i16) void {
+        ctx.box.x = from.box.x + by;
     }
 
-    //lift the child's value in the parent
-    pub fn lift(parent: *Value, child: Value) void {
-        if (parent != .rel_c) return;
-        if (child == .rel_p) unreachable;
-        if (child != .fixed) return;
-        parent.* = .{ .fixed = parent.rel_c + child.fixed };
-    }
-
-    //drops the parents value in the child
-    pub fn drop(child: *Value, parent: Value) void {
-        if (child != .rel_p) return;
-        if (parent == .rel_c) unreachable;
-        if (parent != .fixed) return;
-        child.* = .{ .fixed = child.rel_p + parent.fixed };
-    }
-
-    //swaps the value dependancy around
-    pub fn flip(parent: *Value, child: *Value) void {
-        if (parent != .rel_c) return;
-        if (child != .none) return;
-        child.* = .{ .rel_p = -parent.rel_c };
-        parent.* = .{ .none = .{} };
-    }
-
-    pub fn asrelp(a: Value) Value {
-        return .{ .rel_p = a.fixed };
-    }
-
-    pub fn asrelc(a: Value) Value {
-        return .{ .rel_c = a.fixed };
-    }
-};
-
-pub const Box = struct {
-    pub const empty: Box = .{};
-
-    x: Value = .empty,
-    y: Value = .empty,
-    z: Value = .empty,
-    w: Value = .empty,
-    h: Value = .empty,
-
-    pub fn init(x: Value, y: Value, w: Value, h: Value) Box {
-        return .{ .x = x, .y = y, .w = w, .h = h };
-    }
-
-    pub fn initFixed(x: i16, y: i16, w: i16, h: i16) Box {
-        return .init(.initFixed(x), .initFixed(y), .initFixed(w), .initFixed(h));
-    }
-
-    pub fn lift(parent: *Box, child: Box) void {
-        parent.x.lift(child.x);
-        parent.y.lift(child.y);
-        parent.w.lift(child.w);
-        parent.h.lift(child.h);
-    }
-
-    pub fn flip(parent: *Box, child: *Box) void {
-        parent.x.flip(&child.x);
-        parent.y.flip(&child.y);
-        parent.w.flip(&child.w);
-        parent.h.flip(&child.h);
-    }
-
-    pub fn drop(child: *Box, parent: Box) void {
-        child.x.drop(parent.x);
-        child.y.drop(parent.y);
-        child.w.drop(parent.w);
-        child.h.drop(parent.h);
-    }
-
-    pub fn asrelp(a: Box) Box {
-        return .init(a.x.asrelp(), a.y.asrelp(), a.w.asrelp(), a.h.asrelp());
-    }
-
-    pub fn asrelc(a: Box) Box {
-        return .init(a.x.asrelc(), a.y.asrelc(), a.w.asrelc(), a.h.relc());
-    }
-
-    pub fn contains(self: Box, flag: ValueKind) bool {
-        return self.x == flag or self.y == flag or self.w == flag or self.h == flag;
-    }
-};
-
-pub const BoxDiff = struct {
-    x0: Num = .empty,
-    y0: Num = .empty,
-    x1: Num = .empty,
-    y1: Num = .empty,
-
-    //pub fn add(a: Box, diff: BoxDiff, b: Box) Box {
-    //    //a.pos.x unknown then just return b.pos.x,
-    //    //a.pos.x known, diff.x0 known, return a.pos.x + diff.x0 + b.pos.x <- the b.pos.x
-    //}
-
-    pub fn width(b: BoxDiff) Num {
-        return .add(b.x0, b.x1);
-    }
-
-    pub fn uwidth(b: BoxDiff) u15 {
-        return b.x0.unwrap() + b.x1.unwrap();
-    }
-
-    pub fn height(b: BoxDiff) Num {
-        return .add(b.y0, b.y1);
-    }
-
-    pub fn uheight(b: BoxDiff) u15 {
-        return b.y0.unwrap() + b.y1.unwrap();
-    }
-};
-
-pub const Num = struct {
-    pub const empty: Num = .{ .back = null };
-
-    back: ?u15,
-
-    pub fn init(back: ?u15) Num {
-        return .{ .back = back };
-    }
-
-    pub fn wrap(value: u15) Num {
-        return .{ .back = value };
-    }
-
-    //pub fn offsetBy(a: Num, offset: Num) Num {
-    //
-    // }
-
-    pub fn isempty(num: Num) bool {
-        return num.back == null;
-    }
-
-    pub fn unwrap(num: Num) u15 {
-        return num.back;
-    }
-
-    pub fn add(a: Num, b: Num) Num {
-        if (a.isempty() or b.isempty()) return .empty;
-        return .wrap(a.unwrap() + b.unwrap());
+    pub fn doX(self: *const OffsetTask) void {
+        offsetX(self.ctx, self.from, self.by);
     }
 };
 
 pub const Links = struct {
     pub const empty: Links = .{};
 
-    parent: Cntx = .empty,
-    child: Cntx = .empty,
-    nextSib: Cntx = .empty,
-    prevSib: Cntx = .empty,
-
-    pub fn compDepthFirst(root: Cntx, list: []const Links, gpa: Allocator, ta: Allocator) []Cntx {}
+    parent: Ctx = .empty,
+    child: Ctx = .empty,
+    nextSib: Ctx = .empty,
+    prevSib: Ctx = .empty,
 };
 
 pub const Flags = packed struct {
@@ -350,6 +206,8 @@ pub const Flags = packed struct {
 
     free: bool = true,
     active: bool = false,
-    size_set: bool = false,
-    pos_set: bool = false,
+    x_set: bool = false,
+    y_set: bool = false,
+    w_set: bool = false,
+    h_set: bool = false,
 };

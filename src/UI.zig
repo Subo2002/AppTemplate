@@ -8,35 +8,104 @@ const Vector2U16 = Lib.Vector2U16;
 const TextHandler = @import("TextHandler.zig");
 const Render = @import("Render.zig").Render;
 
-
 pub const UI = @This();
+
+pub const TaskKind = enum {};
+
+pub const Task = union(TaskKind) {};
+
+pub const CtxFlags = packed struct {
+    invalid: bool = false,
+    data: DataFlags = .{},
+};
+
+pub const DataFlags = packed struct {
+    _x: bool = false,
+    _y: bool = false,
+    _w: bool = false,
+    _h: bool = false,
+
+    pub const x: DataFlags = .{ ._x = true };
+    pub const y: DataFlags = .{ ._y = true };
+    pub const w: DataFlags = .{ ._w = true };
+    pub const h: DataFlags = .{ ._h = true };
+    pub const pos: DataFlags = .{ ._x = true, ._y = true };
+    pub const size: DataFlags = .{ ._w = true, ._h = true };
+    pub const box: DataFlags = .{ ._x = true, ._y = true, ._w = true, ._h = true };
+};
+
+pub const MUIImpl = struct {
+    S: type,
+    set_size: ?fn(),
+};
+
+//(Function) Monad UI
+//MUI = T -> MUI, where MUI(void) = UI, basically thinking of UI as a monad where it can be a function from T to the UI, thinking like that though that returned UI
+//could be a functional UI
+pub fn MUI(T: type, impl: MUIImpl) type {
+    return struct {
+        const This = @This();
+
+        data: *UIHandler,
+        root: This,
+        flags: CtxFlags,
+        tasks: std.ArrayList(Task),
+
+        pub fn initBox(ui: *UIHandler) !This {
+            return .{
+                .data = ui,
+                .root = try ui.initCtx(),
+                .flags = .{},
+            };
+        }
+
+        pub fn setSize(self: MUI, size: Vector2U16) This {
+            if (!set_size) @compileError("No setSize");
+
+            //set the size, create new context ref that has the size flags popped off
+        }
+
+        pub fn setBox(self: This, box: Box) This {
+
+        }
+
+        //
+        pub fn curry(self: This, U: type, inc: fn(U) T) MUI(U, MUI(T, S)) {
+
+        }
+
+        //can take any
+        pub fn pad(self: This, padding: Box) This {
+            self
+        }
+
+        //should only take pos -> ui
+        pub fn append(self: This) void {
+
+        }
+    };
+};
 
 pub fn init(text_handler: *TextHandler, text_info: TextHandler.TextInfo, allc: Allocator, renderer: *Render, window_size: Vector2U16) !void {
     _ = text_handler;
 
-    var ui: UIHandler = .empty;
-    //Ctx is a handle to the ui context inside UIHandler
-    //But it also contains flags for whether a certain piece of data of the ui context still needs to be handled by the user
-    //i.e. before an explicit value is needed for rendering, input detection, the ui actually existing any way.
-    //Handling it can mean it's set by the user like in setbox, setsize, or appendCtx. Or it can mean making it's final calculation a task that depends
-    //on the data of another ctx, where the handling of set_whatever is passed in to that new ctx. For example padded_text_ctx will take the x, y, w, or h,
-    //fields of a ctxs box and make them depend on the padding ctx's x, y, w, or h respectivley with a task that offsets according to the given a padding.
-    //and so the responsability of setting x, y, w, or h in that scenario is passed along to the padded_ctx rather than the original ctx.
-    var window_ctx: UIHandler.Ctx = try ui.initCtx(allc);
-    ui.setbox(window_ctx.pop(.box), .init(0, 0, @intCast(window_size.x), @intCast(window_size.y)));
+    const Blah = MUI(null, null, false);
+
+    const box_to_window = try Blah.initBox(allc);
+    window = box_to_window.setbox(.init(0, 0, @intCast(window_size.x), @intCast(window_size.y)));
 
     //doesn't actually handle text rendering yet, so just grabbing the size atm
     const text = "dog";
-    const glyphs = try  TextHandler.compGlyphs(text_info.ttf, allc, text);
+    const glyphs = try TextHandler.compGlyphs(text_info.ttf, allc, text);
     defer allc.free(glyphs);
     const size = TextHandler.compTextLength(text_info, glyphs);
-    var text_ctx = ui.initCtx(allc) catch unreachable;
-    ui.setsize(text_ctx, .init(size, text_info.pixel_height));
-    var padded_text_ctx = ui.padCtx(allc, text_ctx.pop(.pos), text_padding) catch unreachable;
-    ui.appendCtx(window_ctx, padded_text_ctx.pop(.pos));
+    const box_to_text = try .initBox(allc);
+    const pos_to_text = box_to_text.setSize(.init(size, text_info.pixel_height));
+    const pos_to_padded_text = pos_to_text.pad();
+    window.append(pos_to_padded_text);
 
     //This is still todo
-    const ui_render_data: []UIHandler.UIRenderData = ui.renderCtxs(allc);
+    const ui_render_data: []UIHandler.UIRenderData = window.renderCtxs(allc);
     defer allc.free(ui_render_data);
     renderer.renderUI(ui_render_data);
 }
