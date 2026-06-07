@@ -31,7 +31,7 @@ pub const Box = struct {
     pub const empty: Box = .{};
 };
 
-ctxs: std.ArrayList(CtxData),
+ctxs: std.MultiArrayList(CtxData),
 
 pub const empty: UIHandler = .{
     .ctxs = .empty,
@@ -73,6 +73,10 @@ pub fn initCtx(self: *UIHandler) !Ctx {
 
 pub fn getbox(self: *UIHandler, cntx: Ctx) *Box {
     return &self.boxes[cntx.id()];
+}
+
+pub fn getFlags(self: *UIHandler, ctx: Ctx) *Flags {
+    return &self.ctxs.items(.flags)[ctx.id()];
 }
 
 pub fn setbox(self: *UIHandler, cntx: Ctx, box: Box) void {
