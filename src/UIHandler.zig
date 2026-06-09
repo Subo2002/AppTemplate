@@ -16,21 +16,6 @@ const TextHandler = @import("TextHandler.zig");
 
 pub const UIHandler = @This();
 
-pub const CtxData = struct {
-    box: Box,
-    flags: Flags,
-    links: Links,
-};
-
-pub const Box = struct {
-    x: u16,
-    y: u16,
-    w: u16,
-    h: u16,
-
-    pub const empty: Box = .{};
-};
-
 ctxs: std.MultiArrayList(CtxData),
 
 pub const empty: UIHandler = .{
@@ -39,7 +24,7 @@ pub const empty: UIHandler = .{
 
 //WARNING: NOT INITIALIZED
 pub fn takeFreeCntx(self: *UIHandler) !Ctx {
-    const index = try self.ctxs.;
+    //const index = try self.ctxs.;
 
 }
 
@@ -141,26 +126,11 @@ pub const Ctx = struct {
     }
 };
 
-pub fn Compose(comptime kind1: TaskKind, comptime kind2: TaskKind, task1: Task(kind1), task2: Task(kind2)) Task(ComposeTaskKind(kind1, kind2)) {
-    return .init(.{ task1.t, task2.t });
-}
-
-pub fn ComposeTaskKind(comptime kind1: TaskKind, comptime kind2: TaskKind) TaskKind {
-    const ComposedType = .{kind1.T, kind2.T};
-    const composedfn = struct {
-        pub fn do(data: *const ComposedType) void {
-            kind1.task(data[0]);
-            kind2.task(data[1]);
-        }
-    };
-    return .init(ComposedType, composedfn.do);
-}
-
-pub const TaskKind = struct {
+pub const TaskImpl = struct {
     T: type,
-    task: fn(*const T) void,
+    task: fn (*const T, *UIHandler) void,
 
-    pub fn init(T: type, task: *fn(*const T) void) TaskKind {
+    pub fn init(T: type, task: fn (*const T, *UIHandler) void) TaskKind {
         return .{
             .T = T,
             .task = task,
@@ -168,31 +138,72 @@ pub const TaskKind = struct {
     }
 };
 
-pub fn Task(kind: TaskKind) type {
+pub fn TaskWrapper(T: type, task: fn (*const T, *UIHandler) void) type {
     return struct {
-        t: kind.T,
+        t: T,
 
-        pub fn init(t: kind: T) Task(kind) {
+        pub fn init(t: T) Task(kind) {
             return .{ .t = t };
         }
 
         pub fn do(self: *const @This()) void {
-            task(kind.t);
+            task(t);
         }
     };
 }
 
-pub const OffsetTask = struct {
-    ctx: *CtxData,
-    from: *const CtxData,
+pub const Task = union {
+    offset_x: TaskWrapper(OffsetX, OffsetX.do),
+    offset_y: TaskWrapper(OffsetY, OffsetY.do),
+    offset_w: TaskWrapper(OffsetW, OffsetW.do),
+    offset_h: TaskWrapper(OffsetH, OffsetH.do),
+};
+
+pub const OffsetX = struct {
+    from: Ctx,
     by: i16,
+    to: Ctx,
 
-    pub fn offsetX(ctx: *CtxData, from: *const CtxData, by: i16) void {
-        ctx.box.x = from.box.x + by;
+    pub fn do(self: *const OffsetX, ui: *UIHandler) void {
+        assert(!ui.getFlags(self.to).x and ui.getFlags(self.from).x);
+        ui.getFlags(self.to).x = true;
+        ui.getbox(self.to).x = self.by + ui.getbox(self.from).x;
     }
+};
 
-    pub fn doX(self: *const OffsetTask) void {
-        offsetX(self.ctx, self.from, self.by);
+pub const OffsetY = struct {
+    from: Ctx,
+    by: i16,
+    to: Ctx,
+
+    pub fn do(self: *const OffsetX, ui: *UIHandler) void {
+        assert(!ui.getFlags(self.to).y and ui.getFlags(self.from).y);
+        ui.getFlags(self.to).y = true;
+        ui.getbox(self.to).y = self.by + ui.getbox(self.from).y;
+    }
+};
+
+pub const OffsetW = struct {
+    from: Ctx,
+    by: i16,
+    to: Ctx,
+
+    pub fn do(self: *const OffsetW, ui: *UIHandler) void {
+        assert(!ui.getFlags(self.to).w and ui.getFlags(self.from).w);
+        ui.getFlags(self.to).w = true;
+        ui.getbox(self.to).w = self.by + ui.getbox(self.from).w;
+    }
+};
+
+pub const OffsetH = struct {
+    from: Ctx,
+    by: i16,
+    to: Ctx,
+
+    pub fn do(self: *const OffsetH, ui: *UIHandler) void {
+        assert(!ui.getFlags(self.to).h and ui.getFlags(self.from).h);
+        ui.getFlags(self.to).h = true;
+        ui.getbox(self.to).h = self.by + ui.getbox(self.from).h;
     }
 };
 
@@ -210,8 +221,31 @@ pub const Flags = packed struct {
 
     free: bool = true,
     active: bool = false,
-    x_set: bool = false,
-    y_set: bool = false,
-    w_set: bool = false,
-    h_set: bool = false,
+    x: bool = false,
+    y: bool = false,
+    //can be init, for stuff like minimum size, where a value hasn't been set yet,
+    // but there is info that has to be used
+    w: ValueKind = .empty,
+    h: ValueKind = .empty,
+};
+
+pub const ValueKind = enum {
+    empty,
+    init,
+    set,
+};
+
+pub const CtxData = struct {
+    box: Box,
+    flags: Flags,
+    links: Links,
+};
+
+pub const Box = struct {
+    x: u16,
+    y: u16,
+    w: u16,
+    h: u16,
+
+    pub const empty: Box = .{};
 };

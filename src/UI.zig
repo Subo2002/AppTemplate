@@ -8,79 +8,21 @@ const Lib = @import("lib.zig");
 const Vector2U16 = Lib.Vector2U16;
 const TextHandler = @import("TextHandler.zig");
 const Render = @import("Render.zig").Render;
+const Task = UIHandler.Task;
 
-pub const TaskKind = enum {
-    box_as_pos_to_size,
-};
+//{Thing}UI means the UI is a function of Thing returning a UI
 
-pub const Task = union(TaskKind) {};
+//The ones implemented below though are a bit more specific as they
+// take Thing to be a field of the root ctx
+//and also the fn_stack is not taking the data and passing the output to the next fn and so on (i.e. not recusrive-ish)
+//but rather are more like the effects explicitizing monadic/maybe-ish values of the ui contexts
 
-pub const DomainKind = enum {
-    empty = @bitCast(DataFlags{}),
-    x = @bitCast(DataFlags{ .x = true }),
-    y = @bitCast(DataFlags{ .y = true }),
-    w = @bitCast(DataFlags{ .w = true }),
-    h = @bitCast(DataFlags{ .h = true }),
-    pos = @bitCast(DataFlags{ .x = true, .y = true }),
-    size = @bitCast(DataFlags{ .w = true, .h = true }),
-    box = @bitCast(DataFlags{ .x = true, .y = true, .w = true, .h = true }),
-
-    pub const DomainType: std.EnumArray(DomainKind, type) = .init(.{
-        .box = Box,
-        .pos = Vector2U16,
-        .size = VectorU16,
-        .x = u16,
-        .y = u16,
-        .w = u16,
-        .h = u16,
-    });
-};
-
-pub const CtxFlags = packed struct {
-    invalid: bool = false,
-    data: DataFlags = .{},
-};
-
-pub const DataFlags = packed struct {
-    x: bool = false,
-    y: bool = false,
-    w: bool = false,
-    h: bool = false,
-
-    pub fn contains(self: DataFlags, other: DataFlags) bool {
-        return (self.x or !other.x) and
-            (self.y or !other.y) and
-            (self.w or !other.w) and
-            (self.h or !other.h);
-    }
-
-    pub fn diff(self: DataFlags, other: DataFlags) DataFlags {
-        std.debug.assert(self.contains(other));
-        return .{
-            .x = self.x and !other.x,
-            .y = self.y and !other.y,
-            .w = self.w and !other.w,
-            .h = self.h and !other.h,
-        };
-    }
-
-    pub fn diffType(T: type, other: DataFlags) type {
-        return fromType(T).diff(other).Type();
-    }
-
-    pub fn fromType(type: Type) DataFlags {
-        //TODO
-    }
-
-    pub fn Type(self: DataFlags) type {
-        return DomainKind.DomainType.get(@bitCast(self));
-    }
-};
+//maybe make the fn_stack an intrusive hierarchical linked list, then can just put it in UIHandler as well
 
 pub const BaseUI = struct {
     data: *UIHandler,
     root: Cntx,
-    fn_stack: std.ArrayList(Task),
+    fn_stack: std.ArrayList(UIHandler.Task),
 
     pub fn callFnStack(self: *const BaseUI) BaseUI {
         while (self.fn_stack.pop()) |task| {
@@ -92,10 +34,59 @@ pub const BaseUI = struct {
     }
 };
 
-pub const UI = struct {
+pub const ChildUI = struct {
     base: BaseUI,
 
-    pub fn append(self: UI, child: PosUI) UI {}
+    //want to be able to run this on things that don't have all their data set yet
+    //PROBLEM: way too many possible {}UI types. Probably need to return to the pop/push system for responsabilities
+
+    //Needs to be a wrapper context, so it keeps track of the childs height, and that context represents a row
+    //and it fails if it doesn't fit in that row (fixed width i guess, or there is need for a max/min flag instead of init)
+
+    //WRONG, this needs to be having y_first = self_box.y, i.e. aligned to parent.
+    pub fn append(self: ChildUI, child: PosUI) !ChildUI {
+        assert(self.base.data == child.base.data);
+        const ctx = self.base.data;
+        const self_links = ctx.getLinks(self.base.root);
+        const first_child = ctx.getLinks(self_links.child);
+        const last_child_box = ctx.getbox(first_child.prevSib);
+        const last_child_flags = ctx.getFlags(first_child.prevSib);
+        assert(last_child_flags.x and last_child_flags.y and last_child_flags.w and last_child_flags.h);
+        const child_box = ctx.getbox(child.base.root);
+        const x_first = last_child_box.x + last_child_box.w;
+        const y_first = last_child_box.y + last_child_box.h;
+        const child_flags = ctx.getFlags(child.base.root);
+        const child_w = switch (child_flags.w) {
+            .empty => 0,
+            .init => child_box.w,
+            .set => child_box.w,
+        };
+        const child_h = switch (child_flags.h) {
+            .empty => 0,
+            .init => child_box.h,
+            .set => child_box.h,
+        };
+        const self_box = ctx.getbox(self.base.root);
+
+        //STILL NEED TO DO THE FN COMPS
+
+        if (x_first + child_w >= self_box.w) return error.childGoesOffEdge;
+        if (y_first + child_h >= self_box.h) return error.childGoesOffBottom;
+
+        //Actually do the stuff now
+        child_box.x = x_first;
+        child_box.y = y_first;
+
+        ctx.linkCntxs(self.base.root, child.base.root);
+
+        child.base.callFnStack();
+
+        return self;
+    }
+};
+
+pub const UI = struct {
+    base: BaseUI,
 
     pub fn render(self: UI, allc: Allocator) []UIHandler.UIRenderData {}
 };
@@ -108,6 +99,7 @@ pub const BoxUI = struct {
         const ui: BoxUI = .{ .base = .{
             .data = ui_ctx,
             .root = root,
+
             .fn_stack = .empty,
         } };
         return ui;
@@ -115,13 +107,13 @@ pub const BoxUI = struct {
 
     pub fn setBox(self: BoxUI, box: Box) UI {
         const flags = self.base.data.getFlags(self.base.root);
-        assert(!flags.x_set and !flags.y_set and !flags.w_set and !flags.h_set);
+        assert(!flags.x and !flags.y and !flags.w and !flags.h);
         const box_ptr = self.base.data.getbox(self.base.root);
         box_ptr.* = box;
-        flags.x_set = true;
-        flags.y_set = true;
-        flags.w_set = true;
-        flags.h_set = true;
+        flags.x = true;
+        flags.y = true;
+        flags.w = true;
+        flags.h = true;
         return self.base.callFnStack();
     }
 
@@ -141,6 +133,22 @@ pub const PosUI = struct {
     base: BaseUI,
 
     pub fn pad(self: PosUI, allc: Allocator, padding: Box) PosUI {}
+};
+
+pub const XUI = struct {
+    base: BaseUI,
+
+    pub fn pad(self: XUI, allc: Allocator, padding: Box) XUI {
+        const padding_ctx = try self.base.data.initCtx();
+        const padding_box = self.base.data.getbox(padding_ctx);
+        const self_box: *const Box = self.base.data.getbox(self.base.root);
+        const flags: *const UIHandler.Flags = self.base.data.getFlags(self.base.root);
+        assert(!flags.x and flags.y and flags.w and flags.h);
+        self.base.fn_stack.append(allc, .{ .offset_x = .init(self.base.root, padding_ctx, -padding.x) });
+        padding_box.y = self_box.y + padding.y;
+        padding_box.w = self_box.w + padding.w;
+        padding_box.h = self_box.h + padding.h;
+    }
 };
 
 pub const SizeUI = struct {
